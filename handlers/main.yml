@@ -1,7 +1,4 @@
 # file: postgresql/handlers/main.yml
 
   - name: restart postgresql
-    service:
-      name: "{{ postgresql_service_name }}"
-      state: restarted
-      enabled: yes
+    shell: "pg_ctlcluster {{ postgresql_version }} {{ postgresql_cluster_name }} restart"

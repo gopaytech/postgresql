@@ -1,0 +1,2 @@
+---
+postgresql_apt_repository: "deb http://apt-archive.postgresql.org/pub/repos/apt/ {{ ansible_distribution_release }}-pgdg main {{ postgresql_version }}"

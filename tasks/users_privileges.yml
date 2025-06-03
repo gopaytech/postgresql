@@ -5,13 +5,33 @@
     name: "{{ postgresql_service_name }}"
     state: started
 
+# Entries without a privilege string only ensure the role exists (e.g. replication users)
+- name: PostgreSQL | Create replication user
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    state: present
+    login_user: "{{ postgresql_admin_user }}"
+    login_password: "{{ postgresql_admin_password | default(omit) }}"
+    login_host: "{{ item.host | default(omit) }}"
+    login_port: "{{ postgresql_port }}"
+    login_db: "{{ item.db | default('postgres') }}"
+  become: yes
+  become_user: "{{ postgresql_admin_user }}"
+  loop: "{{ postgresql_user_privileges | default([]) }}"
+  when:
+    - item.priv is not defined
+    - item.privs is not defined
+  loop_control:
+    label: "{{ item.name }}"
+
 # Grant database-level privileges
 - name: PostgreSQL | Grant database privileges
   community.postgresql.postgresql_privs:
     type: database
     login_db: "{{ item.db }}"               # database to grant on
     roles: "{{ item.name }}"          # role receiving privileges
-    privs: "{{ item.privs | default('ALL') }}"
+    # `priv` is the key documented in the README; `privs` is accepted as an alias
+    privs: "{{ item.privs | default(item.priv | default('ALL')) }}"
     grant_option: "{{ item.grant_option | default(omit) }}"
     state: present
     login_user: "{{ postgresql_admin_user }}"
@@ -21,4 +41,6 @@
   become: yes
   become_user: "{{ postgresql_admin_user }}"
   loop: "{{ postgresql_user_privileges | default([]) }}"
-  when: (postgresql_user_privileges | default([])) | length > 0
+  when: item.priv is defined or item.privs is defined
+  loop_control:
+    label: "{{ item.name }}"

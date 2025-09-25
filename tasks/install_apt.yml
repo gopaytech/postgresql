@@ -92,6 +92,7 @@
       - "postgresql-{{ postgresql_version }}"
       - "postgresql-client-{{ postgresql_version }}"
       - "postgresql-contrib-{{ postgresql_version }}"
+      - "postgresql-server-dev-{{ postgresql_version }}"
     state: present
     update_cache: true
     cache_valid_time: "{{ apt_cache_valid_time | default(3600) }}"

@@ -5,16 +5,25 @@
     name: "{{ postgresql_service_name }}"
     state: started
 
-- name: PostgreSQL | Make sure the PostgreSQL users are present
-  postgresql_user:
-    name: "{{item.name}}"
-    password: "{{ item.pass | default(omit) }}"
-    encrypted: "{{ item.encrypted | default(omit) }}"
-    port: "{{postgresql_port}}"
+- name: PostgreSQL | Ensure users exist with role attributes (idempotent)
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    # If plain-text password, DO NOT set 'encrypted: true'
+    password: "{{ item.password | default(omit) }}"
+    # Only include this if the password is already hashed (md5... or SCRAM-SHA-256$...)
+    # encrypted: true
+    role_attr_flags: "{{ item.role_attr_flags | default(omit) }}"
     state: "{{ item.state | default('present') }}"
-    login_user: "{{postgresql_admin_user}}"
-  no_log: "{{ postgresql_hide_passwords }}"
+    no_password_changes: "{{ item.no_password_changes | default(omit) }}"
+    login_user: "{{ postgresql_admin_user }}"
+    login_password: "{{ postgresql_admin_password | default(omit) }}"
+    login_host: "{{ item.host | default(omit) }}"
+    login_port: "{{ postgresql_port }}"
+    login_db: "{{ item.login_db | default('postgres') }}"
+  no_log: "{{ postgresql_hide_passwords | default(true) }}"
   become: yes
-  become_user: "{{postgresql_admin_user}}"
-  with_items: "{{postgresql_users}}"
-  when: postgresql_users|length > 0
+  become_user: "{{ postgresql_admin_user }}"
+  loop: "{{ postgresql_users | default([]) }}"
+  when: (postgresql_users | default([])) | length > 0
+  loop_control:
+    label: "{{ item.name }}"

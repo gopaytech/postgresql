@@ -9,3 +9,4 @@ Icon
 test
 *.retry
 ANXS-postgresql.code-workspace
+tests/roles

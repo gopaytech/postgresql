@@ -6,28 +6,28 @@
     state: started
 
 - name: PostgreSQL | Make sure the PostgreSQL databases are present
-  postgresql_db:
-    name: "{{item.name}}"
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
     owner: "{{ item.owner | default(postgresql_database_owner) }}"
     encoding: "{{ item.encoding | default(postgresql_encoding) }}"
     lc_collate: "{{ item.lc_collate | default(postgresql_locale) }}"
     lc_ctype: "{{ item.lc_ctype | default(postgresql_ctype) }}"
-    port: "{{postgresql_port}}"
+    login_port: "{{ postgresql_port }}"
     template: "template0"
     state: "{{ item.state | default('present') }}"
-    login_user: "{{postgresql_admin_user}}"
+    login_user: "{{ postgresql_admin_user }}"
   become: yes
-  become_user: "{{postgresql_admin_user}}"
-  with_items: "{{postgresql_databases}}"
-  when: postgresql_databases|length > 0
+  become_user: "{{ postgresql_admin_user }}"
+  loop: "{{ postgresql_databases }}"
+  when: postgresql_databases | length > 0
 
 - name: PostgreSQL | Add extensions to the databases
   become: yes
   become_user: "{{ postgresql_admin_user }}"
-  postgresql_ext:
+  community.postgresql.postgresql_ext:
     db: "{{ item.0.db }}"
     login_user: "{{ postgresql_service_user }}"
-    port: "{{ postgresql_port }}"
+    login_port: "{{ postgresql_port }}"
     name: "{{ item.1 }}"
   with_subelements:
     - "{{ postgresql_database_extensions }}"

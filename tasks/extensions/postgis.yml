@@ -1,33 +1,50 @@
 # file: postgresql/tasks/extensions/postgis.yml
+# Purpose: Install PostGIS dependencies per OS family, future-proof (no deprecated patterns)
 
-- include_vars: "{{ item }}"
-  with_first_found:
-    - "../vars/{{ ansible_distribution_release }}.yml"
-    - "../vars/empty.yml"
+# Load distro-specific variables (e.g., vars/noble.yml, vars/jammy.yml, vars/bullseye.yml)
+- name: Load distro-specific variables for PostGIS
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+  loop: "{{ query('first_found', params, errors='ignore', wantlist=True) }}"
+  vars:
+    params:
+      files:
+        - "{{ ansible_facts['distribution_release'] }}.yml"
+        - "empty.yml"
+      paths:
+        - "{{ role_path }}/vars"
 
-- name: PostgreSQL | Extensions | Make sure the postgis extensions are installed | Debian
-  apt:
+# Debian/Ubuntu: install PostGIS deps via apt
+- name: PostgreSQL | Extensions | Ensure PostGIS deps are installed | Debian/Ubuntu
+  ansible.builtin.apt:
     name: "{{ postgresql_ext_postgis_deps }}"
     state: present
-    update_cache: yes
-    cache_valid_time: "{{apt_cache_valid_time | default (3600)}}"
-  when: ansible_os_family == "Debian"
+    update_cache: true
+    cache_valid_time: "{{ apt_cache_valid_time | default(3600) }}"
+  when: ansible_facts['os_family'] == 'Debian'
   notify:
     - restart postgresql
 
-- name: PostgreSQL | Extensions | Make sure the postgis extensions are installed | RedHat
-  yum:
+# RHEL-like (non-Fedora) using yum
+- name: PostgreSQL | Extensions | Ensure PostGIS deps are installed | RHEL (yum)
+  ansible.builtin.yum:
     name: "{{ postgresql_ext_postgis_deps }}"
     state: present
-    update_cache: yes
-  when: ansible_pkg_mgr == "yum" and ansible_os_family == "RedHat"
+    update_cache: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - ansible_facts['pkg_mgr'] == 'yum'
+    - ansible_facts['distribution'] != 'Fedora'
   notify:
     - restart postgresql
 
-- name: PostgreSQL | Extensions | Make sure the postgis extensions are installed | Fedora
-  dnf:
+# Fedora using dnf
+- name: PostgreSQL | Extensions | Ensure PostGIS deps are installed | Fedora (dnf)
+  ansible.builtin.dnf:
     name: "{{ postgresql_ext_postgis_deps }}"
     state: present
-  when: ansible_pkg_mgr == "dnf" and ansible_distribution == "Fedora"
+  when:
+    - ansible_facts['pkg_mgr'] == 'dnf'
+    - ansible_facts['distribution'] == 'Fedora'
   notify:
     - restart postgresql

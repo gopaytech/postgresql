@@ -10,11 +10,16 @@
   become: yes
   vars_files:
     - ./vars.yml
-    - ./vars.{{ ansible_distribution }}.{{ ansible_distribution_major_version }}.yml
+
+  pre_tasks:
+    - name: Include OS-specific vars
+      ansible.builtin.include_vars: >-
+        ./vars.{{ ansible_facts.distribution }}.{{ ansible_facts.distribution_major_version }}.yml
+
   tasks:
     - name: Pick the right sudoers group (wheel or sudo) depending on the distro
       set_fact:
-        sudoers_group: "{{ 'sudo' if (ansible_distribution == 'Ubuntu' or ansible_distribution == 'Debian') else 'wheel' }}"
+        sudoers_group: "{{ 'sudo' if (ansible_facts.get('distribution') in ['Ubuntu', 'Debian']) else 'wheel' }}"
     - name: Set up non root ansible user
       user:
         name: ansible
@@ -39,7 +44,7 @@
         update_cache: true
         name:
           - acl
-      when: (ansible_distribution == 'Ubuntu' and ansible_distribution_major_version | int < 18 )
+      when: (ansible_facts.get('distribution') == 'Ubuntu') and ((ansible_facts.get('distribution_major_version') | default('0') | int) < 18)
 
     - name: Install prerequisite packages for molecule testing for Debian/Ubuntu >= 18
       apt:
@@ -47,7 +52,7 @@
         name:
           - gpg-agent
           - acl
-      when: (ansible_distribution == 'Ubuntu' and ansible_distribution_major_version | int >= 18) or ansible_distribution == 'Debian'
+      when: ((ansible_facts.get('distribution') == 'Ubuntu') and ((ansible_facts.get('distribution_major_version') | default('0') | int) >= 18)) or (ansible_facts.get('distribution') == 'Debian')
 
     #---------------------
     # RHEL based distros
@@ -58,8 +63,8 @@
           - langpacks-en
           - glibc-all-langpacks
       when:
-        - "ansible_os_family  == 'RedHat'"
-        - "ansible_distribution_major_version == '8'"
+        - ansible_facts.os_family == 'RedHat'
+        - ansible_facts.distribution_major_version == '8'
 
     #---------------------
     # Fedora based distros
@@ -71,5 +76,5 @@
       until: "'running' in systemctl_status.stdout"
       retries: 30
       delay: 5
-      when: (ansible_distribution == 'Fedora')
+      when: ansible_facts.distribution == 'Fedora'
       changed_when: false

@@ -1,0 +1,6 @@
+---
+collections:
+  - name: community.postgresql
+    # pin if you want:
+    # version: ">=3.8.0,<5.0.0"
+  - name: community.general

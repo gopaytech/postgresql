@@ -1,57 +1,115 @@
 # file: postgresql/tasks/install_apt.yml
+# Purpose: Install PostgreSQL from PGDG on Debian/Ubuntu in a future-proof way
+# Notes:
+# - No use of deprecated top-level facts (uses ansible_facts[...] instead)
+# - No use of deprecated apt_key (uses a keyring + signed-by)
+# - Uses HTTPS and proper keyring location to satisfy apt-secure
+# - Adds default_release only when PGDG suite is available
 
-# The standard ca-certs are needed because  without them apt_key will fail to
-# validate www.postgresql.org (or probably any other source).
-- name: PostgreSQL | Make sure the CA certificates are available | apt
-  apt:
-    pkg: ca-certificates
+# --- Pre-reqs for HTTPS and key handling ---
+# We need CA certs, curl and gnupg to fetch and dearmor the repo key.
+- name: Ensure APT HTTPS/key prerequisites are present
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
     state: present
+    update_cache: true
+  when: ansible_facts['pkg_mgr'] == 'apt'
 
-- name: PostgreSQL | Add PostgreSQL repository apt-key | apt
-  apt_key:
-    id: "{{ postgresql_apt_key_id }}"
-    url: "{{ postgresql_apt_key_url }}"
-    state: present
-    keyring: /etc/apt/trusted.gpg.d/postgresql.gpg
-  when: postgresql_apt_key_url and postgresql_apt_key_id and postgresql_install_repository
+# --- Derive the PGDG suite from the host codename ---
+# Examples: bookworm -> bookworm-pgdg, bullseye -> bullseye-pgdg, jammy -> jammy-pgdg, noble -> noble-pgdg
+- name: Compute PGDG suite from distribution codename
+  ansible.builtin.set_fact:
+    postgresql_apt_suite: "{{ ansible_facts['distribution_release'] }}-pgdg"
+  when: ansible_facts['pkg_mgr'] == 'apt'
 
-- name: PostgreSQL | Add PostgreSQL repository | apt
+# --- Install the PGDG key into a keyring file ---
+# This avoids deprecated apt_key usage and works with newer apt-secure expectations.
+- name: Install PGDG keyring (dearmor GPG key into a file)
+  ansible.builtin.shell: |
+    install -d -m 0755 /usr/share/postgresql-common/pgdg
+    curl -fsSL {{ postgresql_apt_key_url }} \
+      | gpg --dearmor -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+  args:
+    creates: /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+  when: ansible_facts['pkg_mgr'] == 'apt'
+
+# --- Remove old repository file ---
+# We use a new repo file in next task
+- name: PostgreSQL | Remove old PostgreSQL repository | apt
   apt_repository:
-    repo: "{{ postgresql_apt_repository }}"
-    state: present
-  when: postgresql_apt_repository | default('') != '' and postgresql_install_repository
+    repo: "deb http://apt.postgresql.org/pub/repos/apt/ {{ ansible_distribution_release }}-pgdg main {{ postgresql_version }}"
+    state: absent
+  when:
+    - ansible_facts['pkg_mgr'] == 'apt'
+    - (postgresql_install_repository | default(true)) | bool
 
-- name: PostgreSQL | Add PostgreSQL repository preferences | apt
-  template:
+# --- Add the PGDG APT repository (HTTPS + signed-by) ---
+# We explicitly build the repo line to ensure the correct suite and signed-by usage.
+- name: Add PGDG APT repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg]
+      {{ postgresql_apt_repo_base }}
+      {{ postgresql_apt_suite }} main
+    filename: pgdg
+    state: present
+  when:
+    - ansible_facts['pkg_mgr'] == 'apt'
+    - (postgresql_install_repository | default(true)) | bool
+
+# --- Optional pinning (preferences) ---
+- name: Add APT preferences for PGDG (pinning)
+  ansible.builtin.template:
     src: etc_apt_preferences.d_apt_postgresql_org_pub_repos_apt.pref.j2
     dest: /etc/apt/preferences.d/apt_postgresql_org_pub_repos_apt.pref
-  when: postgresql_apt_pin_priority and postgresql_install_repository
+  when:
+    # cast to int, compare => boolean
+    - (postgresql_apt_pin_priority | default(0) | int) > 0
+    - (postgresql_install_repository | default(true)) | bool
 
-- name: PostgreSQL | Make sure the dependencies are installed | apt
-  apt:
-    pkg: "{{ postgresql_apt_dependencies }}"
+# --- Ensure role-level APT dependencies are present ---
+# This is where you can ensure build or runtime deps required before installing PostgreSQL.
+- name: Ensure role APT dependencies are installed
+  ansible.builtin.apt:
+    name: "{{ postgresql_apt_dependencies | default([]) }}"
     state: present
-    update_cache: yes
-    cache_valid_time: "{{apt_cache_valid_time | default (3600)}}"
+    update_cache: true
+    cache_valid_time: "{{ apt_cache_valid_time | default(3600) }}"
+  when:
+    - ansible_facts['pkg_mgr'] == 'apt'
+    - (postgresql_apt_dependencies | default([])) | length > 0
 
-- name: PostgreSQL | Install PostgreSQL | apt
-  apt:
+# --- Install PostgreSQL packages from PGDG ---
+# Use default_release only if we know the suite; this avoids "invalid APT::Default-Release" errors.
+- name: Install PostgreSQL server/client/contrib
+  ansible.builtin.apt:
     name:
-      - "postgresql-{{postgresql_version}}"
-      - "postgresql-client-{{postgresql_version}}"
-      - "postgresql-contrib-{{postgresql_version}}"
-      - "postgresql-server-dev-{{postgresql_version}}"
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+      - "postgresql-contrib-{{ postgresql_version }}"
+      - "postgresql-server-dev-{{ postgresql_version }}"
     state: present
-    update_cache: yes
-    default_release: "{{postgresql_default_release | default(ansible_distribution_release + '-pgdg')}}"
-    cache_valid_time: "{{apt_cache_valid_time | default (3600)}}"
-  environment: "{{postgresql_env}}"
+    update_cache: true
+    cache_valid_time: "{{ apt_cache_valid_time | default(3600) }}"
+    default_release: >-
+      {{ postgresql_default_release
+         | default(postgresql_apt_suite | default(omit)) }}
+  environment: "{{ postgresql_env | default({}) }}"
+  when: ansible_facts['pkg_mgr'] == 'apt'
 
-- name: PostgreSQL | PGTune | apt
-  apt:
+# --- Optional: install pgtune from PGDG ---
+# Only if your role enables pgtune.
+- name: Install pgtune
+  ansible.builtin.apt:
     name: pgtune
     state: present
-    update_cache: yes
-    cache_valid_time: "{{apt_cache_valid_time | default (3600)}}"
-  environment: "{{postgresql_env}}"
-  when: postgresql_pgtune
+    update_cache: true
+    cache_valid_time: "{{ apt_cache_valid_time | default(3600) }}"
+  environment: "{{ postgresql_env | default({}) }}"
+  when:
+    - ansible_facts['pkg_mgr'] == 'apt'
+    - (postgresql_pgtune | default(false)) | bool

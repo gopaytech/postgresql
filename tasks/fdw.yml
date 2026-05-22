@@ -1,25 +1,50 @@
 ---
 # file: postgresql/tasks/fdw.yml
-# tasks for PostgreSQL Foreign Data Wrappers
+# Purpose: Install packages required by PostgreSQL Foreign Data Wrappers (FDW)
 
-- name: PostgreSQL | FDW | Load OS specific variables
-  include_vars: "{{ lookup('first_found', params) }}"
+# Compute the best-matching vars file once (distribution, then family, then fallback)
+- name: FDW | Compute OS-specific vars candidate list
+  ansible.builtin.set_fact:
+    fdw_candidates: "{{ query('first_found', fdw_params, errors='ignore', wantlist=True) }}"
   vars:
-    params:
+    fdw_params:
       files:
-        - "{{ ansible_distribution }}.yml"
-        - "{{ ansible_os_family }}.yml"
+        # Most specific: distribution (e.g., Ubuntu.yml, Debian.yml, Rocky.yml)
+        - "{{ ansible_facts['distribution'] }}.yml"
+        # Fallback: OS family (e.g., Debian.yml, RedHat.yml)
+        - "{{ ansible_facts['os_family'] }}.yml"
+        # Optional final fallback if you keep one
+        - "empty.yml"
       paths:
-        - ../vars
+        - "{{ role_path }}/vars"
 
-- name: PostgreSQL | FDW | MySQL
-  package:
+# Assert that at least one vars file exists before including
+- name: FDW | Assert variables loaded
+  ansible.builtin.assert:
+    that:
+      - (fdw_candidates | length) > 0
+    fail_msg: "No OS-specific vars found for FDW."
+    success_msg: "FDW vars file found: {{ fdw_candidates[0] | default('unknown') }}"
+
+# Include the first matching vars file
+- name: FDW | Load OS-specific variables
+  ansible.builtin.include_vars:
+    file: "{{ fdw_candidates[0] }}"
+
+# Install MySQL FDW dependencies (e.g., mysql/postgresql-mysql-fdw packages)
+- name: FDW | Install MySQL FDW packages
+  ansible.builtin.package:
     name: "{{ postgresql_fdw_mysql_packages }}"
     state: present
-  when: postgresql_fdw_mysql
+  when:
+    - (postgresql_fdw_mysql | default(false)) | bool
+    - (postgresql_fdw_mysql_packages | default([])) | length > 0
 
-- name: PostgreSQL | FDW | OGR
-  package:
+# Install OGR FDW dependencies (e.g., gdal/ogr-related packages)
+- name: FDW | Install OGR FDW packages
+  ansible.builtin.package:
     name: "{{ postgresql_fdw_ogr_packages }}"
     state: present
-  when: postgresql_fdw_ogr
+  when:
+    - (postgresql_fdw_ogr | default(false)) | bool
+    - (postgresql_fdw_ogr_packages | default([])) | length > 0
